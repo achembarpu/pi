@@ -10,11 +10,14 @@ import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import {
 	defaultModelPerProvider,
+	filterScopedModels,
 	findInitialModel,
 	parseModelPattern,
 	resolveCliModel,
 	resolveModelScope,
+	resolveModelScopeFromModels,
 	resolveModelScopeWithDiagnostics,
+	resolveModelScopeWithExclusions,
 } from "../src/core/model-resolver.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -315,6 +318,32 @@ describe("resolveModelScopeWithDiagnostics", () => {
 		expect(result.scopedModels.map((scoped) => scoped.model.id)).toEqual(["bracketed-model[1m]"]);
 		expect(result.scopedModels[0].thinkingLevel).toBe("high");
 		expect(result.diagnostics).toEqual([]);
+	});
+
+	test("filters glob-matched disabled models from the enabled scope", () => {
+		const enabled = resolveModelScopeFromModels(["*"], allModels).scopedModels;
+		const disabled = resolveModelScopeFromModels(["*sonnet*"], allModels).scopedModels;
+
+		expect(filterScopedModels(enabled, disabled).map((scoped) => scoped.model.id)).toEqual(["gpt-4o"]);
+	});
+
+	test("treats disabled-only settings as an explicit scope", () => {
+		const result = resolveModelScopeWithExclusions(undefined, ["*sonnet*"], allModels);
+
+		expect(result.isScoped).toBe(true);
+		expect(result.scopedModels.map((scoped) => scoped.model.id)).toEqual([
+			"gpt-4o",
+			"qwen/qwen3-coder:exacto",
+			"openai/gpt-4o:extended",
+		]);
+	});
+
+	test("keeps an empty scope distinct from unrestricted model cycling", () => {
+		const excluded = resolveModelScopeWithExclusions(undefined, ["**"], allModels);
+		const unrestricted = resolveModelScopeWithExclusions(undefined, undefined, allModels);
+
+		expect(excluded).toMatchObject({ isScoped: true, scopedModels: [] });
+		expect(unrestricted).toMatchObject({ isScoped: false, scopedModels: [] });
 	});
 });
 

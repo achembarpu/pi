@@ -296,12 +296,16 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `enabledModels` | string[] | - | Model patterns for Ctrl+P cycling (same format as `--models` CLI flag) |
+| `disabledModels` | string[] | - | Model patterns excluded from the `enabledModels` scope |
 
 ```json
 {
-  "enabledModels": ["claude-*", "gpt-4o", "gemini-2*"]
+  "enabledModels": ["claude-*", "gpt-4o", "gemini-2*"],
+  "disabledModels": ["claude-opus-*"]
 }
 ```
+
+`disabledModels` is resolved with the same glob and thinking-level syntax as `enabledModels`, then removed from the enabled scope. If no `enabledModels` (or `--models`) scope is configured, Pi implicitly enables all models before applying `disabledModels`.
 
 ### Markdown
 

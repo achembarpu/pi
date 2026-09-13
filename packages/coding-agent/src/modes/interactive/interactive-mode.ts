@@ -86,6 +86,7 @@ import {
 	defaultModelPerProvider,
 	findExactModelReferenceMatch,
 	resolveModelScopeFromModels,
+	resolveModelScopeWithExclusions,
 } from "../../core/model-resolver.ts";
 import { CredentialSynchronizationError } from "../../core/model-runtime.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
@@ -5025,15 +5026,24 @@ export class InteractiveMode {
 		let availableModels = [...this.session.modelRuntime.getAvailableSnapshot()];
 		let availableModelIds = new Set(availableModels.map((model) => `${model.provider}/${model.id}`));
 		const configuredPatterns = this.settingsManager.getEnabledModels();
+		const disabledPatterns = this.settingsManager.getDisabledModels();
+		const hasDisabledPatterns = (disabledPatterns?.length ?? 0) > 0;
 		const sessionScopedModels = this.session.scopedModels;
 		const configuredEnabledIds = (models: readonly Model<any>[]): string[] | null => {
-			if (!configuredPatterns?.length) return null;
-			const resolved = resolveModelScopeFromModels(configuredPatterns, models);
+			const resolved = resolveModelScopeWithExclusions(configuredPatterns, disabledPatterns, models);
+			if (!resolved.isScoped) return null;
 			const ids = resolved.scopedModels.map((scoped) => `${scoped.model.provider}/${scoped.model.id}`);
-			for (const diagnostic of resolved.diagnostics) {
-				if (diagnostic.code === "no-match" && !ids.includes(diagnostic.pattern)) ids.push(diagnostic.pattern);
+			if (configuredPatterns?.length) {
+				const enabledResult = resolveModelScopeFromModels(configuredPatterns, models);
+				for (const diagnostic of enabledResult.diagnostics) {
+					if (diagnostic.code === "no-match" && !ids.includes(diagnostic.pattern)) ids.push(diagnostic.pattern);
+				}
 			}
 			return ids;
+		};
+		const getAllowedModels = (models: readonly Model<any>[]): Model<any>[] => {
+			const resolved = resolveModelScopeWithExclusions(undefined, disabledPatterns, models);
+			return resolved.isScoped ? resolved.scopedModels.map((scoped) => scoped.model) : [...models];
 		};
 
 		let currentEnabledIds =
@@ -5044,17 +5054,13 @@ export class InteractiveMode {
 
 		const updateSessionModels = (enabledIds: string[] | null): void => {
 			currentEnabledIds = enabledIds === null ? null : [...enabledIds];
+			const selectedPatterns = enabledIds ?? [...availableModelIds];
+			const resolved = resolveModelScopeWithExclusions(selectedPatterns, disabledPatterns, availableModels);
 			const hasEnabledAvailableModel = enabledIds?.some((id) => availableModelIds.has(id)) ?? false;
 			const allAvailableModelsEnabled =
 				enabledIds !== null && [...availableModelIds].every((id) => enabledIds.includes(id));
-			if (enabledIds && hasEnabledAvailableModel && !allAvailableModelsEnabled) {
-				const newScopedModels = resolveModelScopeFromModels(enabledIds, availableModels).scopedModels;
-				this.session.setScopedModels(
-					newScopedModels.map((scoped) => ({
-						model: scoped.model,
-						thinkingLevel: scoped.thinkingLevel,
-					})),
-				);
+			if (hasDisabledPatterns || (enabledIds && hasEnabledAvailableModel && !allAvailableModelsEnabled)) {
+				this.session.setScopedModels(resolved.scopedModels);
 			} else {
 				this.session.setScopedModels([]);
 			}
@@ -5072,7 +5078,7 @@ export class InteractiveMode {
 			}, 15_000);
 			const selector = new ScopedModelsSelectorComponent(
 				{
-					allModels: availableModels,
+					allModels: getAllowedModels(availableModels),
 					enabledModelIds: currentEnabledIds,
 					refreshStatus: "Refreshing model catalogs…",
 				},
@@ -5082,10 +5088,13 @@ export class InteractiveMode {
 						updateSessionModels(enabledIds);
 					},
 					onPersist: (enabledIds) => {
+						const allowedModelIds = new Set(
+							getAllowedModels(availableModels).map((model) => `${model.provider}/${model.id}`),
+						);
 						const allEnabled =
 							enabledIds !== null &&
-							enabledIds.length === availableModels.length &&
-							enabledIds.every((id) => availableModelIds.has(id));
+							enabledIds.length === allowedModelIds.size &&
+							enabledIds.every((id) => allowedModelIds.has(id));
 						const newPatterns = enabledIds === null || allEnabled ? undefined : enabledIds;
 						this.settingsManager.setEnabledModels(newPatterns ? [...newPatterns] : undefined);
 						this.showStatus("Model selection saved to settings");
@@ -5101,11 +5110,12 @@ export class InteractiveMode {
 					if (disposed) return;
 					availableModels = [...this.session.modelRuntime.getAvailableSnapshot()];
 					availableModelIds = new Set(availableModels.map((model) => `${model.provider}/${model.id}`));
+					const allowedModels = getAllowedModels(availableModels);
 					if (!selectionChanged && sessionScopedModels.length === 0) {
 						currentEnabledIds = configuredEnabledIds(availableModels);
-						selector.updateModels(availableModels, currentEnabledIds);
+						selector.updateModels(allowedModels, currentEnabledIds);
 					} else {
-						selector.updateModels(availableModels);
+						selector.updateModels(allowedModels);
 					}
 					if (currentEnabledIds !== null) updateSessionModels(currentEnabledIds);
 					if (result.aborted && timedOut) {

@@ -279,7 +279,7 @@ export interface ResolveModelScopeResult {
 }
 
 export function resolveModelScopeFromModels(
-	patterns: string[],
+	patterns: readonly string[],
 	models: readonly Model<Api>[],
 ): ResolveModelScopeResult {
 	const availableModels = [...models];
@@ -360,8 +360,49 @@ export function resolveModelScopeFromModels(
 	return { scopedModels, diagnostics };
 }
 
+/** Remove models matching a separately resolved exclusion scope. */
+export function filterScopedModels(
+	scopedModels: readonly ScopedModel[],
+	disabledModels: readonly ScopedModel[],
+): ScopedModel[] {
+	const disabledIds = new Set(disabledModels.map((scoped) => `${scoped.model.provider}\0${scoped.model.id}`));
+	return scopedModels.filter((scoped) => !disabledIds.has(`${scoped.model.provider}\0${scoped.model.id}`));
+}
+
+/**
+ * Resolve enabled and disabled model settings against one model catalogue.
+ *
+ * When only exclusions are configured, the available catalogue is the implicit
+ * enabled scope. `isScoped` distinguishes that configured scope from the empty
+ * array that represents unrestricted model cycling.
+ */
+export function resolveModelScopeWithExclusions(
+	enabledPatterns: readonly string[] | undefined,
+	disabledPatterns: readonly string[] | undefined,
+	models: readonly Model<Api>[],
+): ResolveModelScopeResult & { isScoped: boolean } {
+	const hasEnabledPatterns = (enabledPatterns?.length ?? 0) > 0;
+	const hasDisabledPatterns = (disabledPatterns?.length ?? 0) > 0;
+	if (!hasEnabledPatterns && !hasDisabledPatterns) {
+		return { scopedModels: [], diagnostics: [], isScoped: false };
+	}
+
+	const enabledResult = hasEnabledPatterns
+		? resolveModelScopeFromModels(enabledPatterns ?? [], models)
+		: { scopedModels: models.map((model) => ({ model })), diagnostics: [] };
+	const disabledResult = hasDisabledPatterns
+		? resolveModelScopeFromModels(disabledPatterns ?? [], models)
+		: { scopedModels: [], diagnostics: [] };
+
+	return {
+		scopedModels: filterScopedModels(enabledResult.scopedModels, disabledResult.scopedModels),
+		diagnostics: [...enabledResult.diagnostics, ...disabledResult.diagnostics],
+		isScoped: true,
+	};
+}
+
 export async function resolveModelScopeWithDiagnostics(
-	patterns: string[],
+	patterns: readonly string[],
 	modelRuntime: ModelRuntime,
 	options?: AuthOperationOptions,
 ): Promise<ResolveModelScopeResult> {
@@ -369,7 +410,7 @@ export async function resolveModelScopeWithDiagnostics(
 }
 
 export async function resolveModelScope(
-	patterns: string[],
+	patterns: readonly string[],
 	modelRuntime: ModelRuntime,
 	options?: AuthOperationOptions,
 ): Promise<ScopedModel[]> {

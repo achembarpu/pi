@@ -11,6 +11,7 @@ import { createHarness, type Harness } from "../harness.ts";
 function createInteractiveContext(options: {
 	allModels: Model<Api>[];
 	enabledModelIds: string[];
+	disabledModelIds?: string[];
 	scopedModels?: Array<{ model: Model<Api> }>;
 }) {
 	let selector: ScopedModelsSelectorComponent | undefined;
@@ -27,6 +28,7 @@ function createInteractiveContext(options: {
 		},
 		settingsManager: {
 			getEnabledModels: () => options.enabledModelIds,
+			getDisabledModels: () => options.disabledModelIds,
 			setEnabledModels: vi.fn(),
 		},
 		showStatus: vi.fn(),
@@ -127,6 +129,32 @@ describe("issue #6949 unavailable scoped models", () => {
 		const selector = getSelector();
 		if (!selector) throw new Error("Expected scoped-model selector to open");
 		expect(stripAnsi(selector.render(100).join("\n"))).toContain(`${fullId} [unavailable]`);
+	});
+
+	it("keeps disabled models out of the live scope when all models are selected", async () => {
+		const harness = await createHarness({
+			models: [
+				{ id: "enabled", name: "Enabled" },
+				{ id: "disabled", name: "Disabled" },
+			],
+		});
+		harnesses.push(harness);
+		const [enabled, disabled] = harness.models;
+		const { context, getSelector, setScopedModels } = createInteractiveContext({
+			allModels: [...harness.models],
+			enabledModelIds: [],
+			disabledModelIds: [`${disabled.provider}/${disabled.id}`],
+			scopedModels: [{ model: enabled }],
+		});
+
+		await showModelsSelector(context);
+		const selector = getSelector();
+		if (!selector) throw new Error("Expected scoped-model selector to open");
+		expect(stripAnsi(selector.render(100).join("\n"))).not.toContain(disabled.id);
+
+		const callbacks = (selector as unknown as { callbacks: { onChange: (ids: string[] | null) => void } }).callbacks;
+		callbacks.onChange(null);
+		expect(setScopedModels).toHaveBeenLastCalledWith([{ model: enabled, thinkingLevel: undefined }]);
 	});
 
 	it("does not clear a partial scope when an enabled model is unavailable", async () => {

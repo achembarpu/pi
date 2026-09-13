@@ -137,6 +137,7 @@ export interface Settings {
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
+	disabledModels?: string[]; // Model patterns to exclude from enabledModels
 	defaultTools?: string[]; // Initial built-in tool selection
 	doubleEscapeAction?: "fork" | "tree" | "none"; // Action for double-escape with empty editor (default: "tree")
 	treeFilterMode?: "default" | "no-tools" | "user-only" | "labeled-only" | "all"; // Default filter when opening /tree
@@ -1316,6 +1317,10 @@ export class SettingsManager {
 		return this.settings.enabledModels;
 	}
 
+	getDisabledModels(): string[] | undefined {
+		return this.settings.disabledModels;
+	}
+
 	getDefaultTools(): string[] | undefined {
 		const tools = this.settings.defaultTools;
 		return tools ? [...tools] : undefined;
@@ -1324,6 +1329,12 @@ export class SettingsManager {
 	setEnabledModels(patterns: string[] | undefined): void {
 		this.globalSettings.enabledModels = patterns;
 		this.markModified("enabledModels");
+		this.save();
+	}
+
+	setDisabledModels(patterns: string[] | undefined): void {
+		this.globalSettings.disabledModels = patterns;
+		this.markModified("disabledModels");
 		this.save();
 	}
 

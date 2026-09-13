@@ -45,7 +45,7 @@ import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
-import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
+import { resolveCliModel, resolveModelScopeWithExclusions, type ScopedModel } from "./core/model-resolver.ts";
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
@@ -785,11 +785,25 @@ export async function main(args: string[], options?: MainOptions) {
 			})),
 		];
 
+		const disabledModelPatterns = settingsManager.getDisabledModels();
 		const modelPatterns = parsed.models ?? settingsManager.getEnabledModels();
-		const scopedModels =
-			modelPatterns && modelPatterns.length > 0
-				? await resolveModelScope(modelPatterns, modelRuntime, { signal: AbortSignal.timeout(15_000) })
-				: [];
+		let scopedModels: ScopedModel[] = [];
+		if (modelPatterns?.length || disabledModelPatterns?.length) {
+			const availableModels = await modelRuntime.getAvailable(undefined, {
+				signal: AbortSignal.timeout(15_000),
+			});
+			const resolvedScope = resolveModelScopeWithExclusions(modelPatterns, disabledModelPatterns, availableModels);
+			for (const diagnostic of resolvedScope.diagnostics) {
+				console.warn(chalk.yellow(`Warning: ${diagnostic.message}`));
+			}
+			scopedModels = resolvedScope.scopedModels;
+			if (scopedModels.length === 0) {
+				diagnostics.push({
+					type: "error",
+					message: "No models remain after applying the configured model scope.",
+				});
+			}
+		}
 		const {
 			options: sessionOptions,
 			cliThinkingFromModel,
